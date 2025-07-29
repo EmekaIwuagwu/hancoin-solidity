@@ -34,7 +34,7 @@
 ```bash
 # Clone the repository
 git clone https://github.com/EmekaIwuagwu/hancoin-solidity.git
-cd hancoin-project
+cd hancoin-solidity
 
 # Install dependencies
 npm install
