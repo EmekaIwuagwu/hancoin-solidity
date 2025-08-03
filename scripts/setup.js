@@ -57,22 +57,6 @@ async function main() {
         console.log("ℹ️  No known stablecoin addresses for this network");
     }
 
-    // ============ CONFIGURE LOAN PARAMETERS ============
-    
-    console.log("\n💰 Configuring loan parameters...");
-    
-    try {
-        const tx = await hancoin.setLoanParameters(
-            500,           // 5% annual interest
-            365 * 24 * 60 * 60, // 1 year
-            7500           // 75% LTV ratio
-        );
-        await tx.wait();
-        console.log("✅ Loan parameters configured");
-    } catch (error) {
-        console.log("⚠️  Failed to set loan parameters:", error.message);
-    }
-
     // ============ VERIFY SETUP ============
     
     console.log("\n🔍 Verifying setup...");
@@ -84,7 +68,11 @@ async function main() {
     console.log("📈 Exchange rate:", exchangeRate.toString(), "HNXZ = 1 ETH");
     
     const totalSupply = await hancoin.totalSupply();
-    console.log("🪙 Total HNXZ supply:", ethers.utils.formatEther(totalSupply), "HNXZ");
+    console.log("🪙 Total HNXZ supply:", ethers.formatEther(totalSupply), "HNXZ");
+
+    // Check if HNXZ is approved as collateral
+    const hnxzApproved = await hancoin.approvedCollateralTokens(hancoin.address);
+    console.log("✅ HNXZ approved as collateral:", hnxzApproved);
 
     console.log("\n🎉 Setup Complete!");
     console.log("✅ Collateral tokens configured");

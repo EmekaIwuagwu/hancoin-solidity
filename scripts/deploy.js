@@ -1,7 +1,5 @@
 const hre = require("hardhat");
 const { ethers } = hre;
-// Fix: Import formatEther directly from ethers
-const { formatEther, parseEther } = ethers;
 const fs = require("fs");
 const path = require("path");
 
@@ -30,11 +28,11 @@ async function main() {
     const balance = await ethers.provider.getBalance(deployerAddress);
     
     console.log("📝 Deployer:", deployerAddress);
-    console.log("💰 Balance:", formatEther(balance), "ETH\n"); // Fixed: removed utils.
+    console.log("💰 Balance:", ethers.formatEther(balance), "ETH\n");
 
     const deploymentInfo = {
         network: networkName,
-        chainId: network.chainId,
+        chainId: network.chainId.toString(),
         deployer: deployerAddress,
         timestamp: new Date().toISOString(),
         contracts: {}
@@ -49,12 +47,12 @@ async function main() {
 
         const MockEntryPoint = await ethers.getContractFactory("MockEntryPoint");
         const entryPoint = await MockEntryPoint.deploy();
-        await entryPoint.waitForDeployment(); // Fixed: use waitForDeployment() instead of deployed()
+        await entryPoint.waitForDeployment();
 
-        entryPointAddress = await entryPoint.getAddress(); // Fixed: use getAddress()
+        entryPointAddress = await entryPoint.getAddress();
         deploymentInfo.contracts.entryPoint = {
             address: entryPointAddress,
-            transactionHash: entryPoint.deploymentTransaction().hash,
+            transactionHash: entryPoint.deploymentTransaction()?.hash,
             type: "mock"
         };
 
@@ -72,14 +70,13 @@ async function main() {
     console.log("\n🪙 Deploying Hancoin...");
 
     const Hancoin = await ethers.getContractFactory("Hancoin");
-    // Deploy without constructor arguments - the contract likely doesn't need them
     const hancoin = await Hancoin.deploy();
     await hancoin.waitForDeployment();
 
     const hancoinAddress = await hancoin.getAddress();
     deploymentInfo.contracts.hancoin = {
         address: hancoinAddress,
-        transactionHash: hancoin.deploymentTransaction().hash,
+        transactionHash: hancoin.deploymentTransaction()?.hash,
         name: "Hancoin",
         symbol: "HNXZ",
         totalSupply: "1000000000",
@@ -87,7 +84,7 @@ async function main() {
     };
 
     console.log("✅ Hancoin deployed to:", hancoinAddress);
-    console.log("📊 Total Supply:", formatEther(await hancoin.totalSupply()), "HNXZ");
+    console.log("📊 Total Supply:", ethers.formatEther(await hancoin.totalSupply()), "HNXZ");
 
     // ============ STEP 3: DEPLOY PAYMASTER ============
 
@@ -100,7 +97,7 @@ async function main() {
     const paymasterAddress = await paymaster.getAddress();
     deploymentInfo.contracts.paymaster = {
         address: paymasterAddress,
-        transactionHash: paymaster.deploymentTransaction().hash,
+        transactionHash: paymaster.deploymentTransaction()?.hash,
         entryPoint: entryPointAddress,
         hancoinToken: hancoinAddress
     };
@@ -124,20 +121,38 @@ async function main() {
     await setRateTx.wait();
     console.log(`📈 Exchange rate set to: ${exchangeRate} HNXZ = 1 ETH`);
 
-    const depositAmount = parseEther(process.env.PAYMASTER_INITIAL_DEPOSIT || "1.0");
+    const depositAmount = ethers.parseEther(process.env.PAYMASTER_INITIAL_DEPOSIT || "1.0");
 
-    if (balance > (depositAmount * 2n)) { // Fixed: BigInt comparison
-        console.log(`💰 Depositing ${formatEther(depositAmount)} ETH to paymaster...`);
+    if (balance > (depositAmount * 2n)) {
+        console.log(`💰 Depositing ${ethers.formatEther(depositAmount)} ETH to paymaster...`);
         const depositTx = await paymaster.depositToEntryPoint({ value: depositAmount });
         await depositTx.wait();
         console.log("✅ ETH deposited to paymaster");
 
-        deploymentInfo.contracts.paymaster.initialDeposit = formatEther(depositAmount);
+        deploymentInfo.contracts.paymaster.initialDeposit = ethers.formatEther(depositAmount);
     } else {
         console.log("⚠️  Skipping ETH deposit due to low balance");
     }
 
-    // ============ STEP 6: SAVE DEPLOYMENT INFO ============
+    // ============ STEP 6: SETUP COLLATERAL AND LOAN PARAMS ============
+
+    console.log("\n🏦 Setting up loan system...");
+
+    // Approve HNXZ as collateral for testing
+    const approveCollateralTx = await hancoin.setApprovedCollateralToken(hancoinAddress, true);
+    await approveCollateralTx.wait();
+    console.log("✅ HNXZ approved as collateral token");
+
+    // Set loan parameters
+    const loanParamsTx = await hancoin.setLoanParameters(
+        500,                    // 5% annual interest
+        365 * 24 * 60 * 60,    // 1 year duration
+        7500                   // 75% LTV ratio
+    );
+    await loanParamsTx.wait();
+    console.log("✅ Loan parameters configured");
+
+    // ============ STEP 7: SAVE DEPLOYMENT INFO ============
 
     const deploymentPath = path.join(__dirname, "..", "deployment.json");
     fs.writeFileSync(deploymentPath, JSON.stringify(deploymentInfo, null, 2));
@@ -151,7 +166,7 @@ async function main() {
         },
         network: {
             name: networkName,
-            chainId: network.chainId
+            chainId: network.chainId.toString()
         },
         exchangeRate: {
             hnxzPerEth: parseInt(exchangeRate),
@@ -166,10 +181,13 @@ export const HANCOIN_ABI = [
     "function depositForGas(uint256 amount) external",
     "function withdrawGasDeposit(uint256 amount) external", 
     "function getGasDeposit(address user) external view returns (uint256)",
-    "function canPayGas(address user, uint256 estimatedGas) external view returns (bool)",
     "function balanceOf(address account) external view returns (uint256)",
     "function transfer(address to, uint256 amount) external returns (bool)",
-    "function approve(address spender, uint256 amount) external returns (bool)"
+    "function approve(address spender, uint256 amount) external returns (bool)",
+    "function createEscrow(address recipient, uint256 amount) external",
+    "function releaseEscrow(uint256 escrowId) external",
+    "function requestLoan(address collateralToken, uint256 collateralAmount, uint256 loanAmount) external",
+    "function repayLoan(uint256 loanId) external"
 ];
 
 export const PAYMASTER_ABI = [
@@ -197,10 +215,10 @@ export const PAYMASTER_ABI = [
 
     console.log("\n📋 Next Steps:");
     console.log("==============");
-    console.log("1. Run setup script:", `npm run setup:${networkName}`);
+    console.log("1. Run setup script:", `npm run setup`);
     console.log("2. Test gas abstraction:", "npm run test-gas-abstraction");
     if (networkName !== "localhost" && networkName !== "hardhat") {
-        console.log("3. Verify contracts:", `npm run verify:${networkName}`);
+        console.log("3. Verify contracts:", `npm run verify`);
     }
 
     console.log("\n💡 Gas Abstraction is now ready!");
